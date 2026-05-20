@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+
+# Name: Aakarsh Sagar Mahajan
+# Date: 20 May 2026
+#
+# clean - reads a CSV of YouTube trending video data and removes rows
+# that contain missing fields, non-numeric view/like/dislike counts,
+# malformed dates, or invalid boolean values in the disabled columns.
+# cleaned output is written to stdout so it can be redirected to a file.
+#
+# Usage: ./clean <inputfile>
+
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 <inputfile>" >&2
+    exit 1
+fi
+
+inputfile="$1"
+
+if [ ! -f "$inputfile" ]; then
+    echo "Error: file '$inputfile' not found" >&2
+    exit 1
+fi
+
+# expected columns: video_id,publish_date,views,likes,dislikes,comments_disabled,ratings_disabled
+
+# print header first
+head -1 "$inputfile"
+
+# skip header, process rest line by line
+tail -n +2 "$inputfile" | while IFS=',' read -r video_id publish_date views likes dislikes comments_disabled ratings_disabled; do
+
+    # skip rows that don't have all 7 fields
+    # (still need to handle quoted commas properly - TODO)
+    if [ -z "$video_id" ] || [ -z "$publish_date" ] || [ -z "$views" ]; then
+        continue
+    fi
+
+    # views, likes, dislikes should be non-negative integers
+    if ! [[ "$views" =~ ^[0-9]+$ ]]; then
+        continue
+    fi
+
+    if ! [[ "$likes" =~ ^[0-9]+$ ]]; then
+        continue
+    fi
+
+    if ! [[ "$dislikes" =~ ^[0-9]+$ ]]; then
+        continue
+    fi
+
+    # publish_date should be in YYYY-MM-DD format
+    if ! [[ "$publish_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+        continue
+    fi
+
+    # comments_disabled and ratings_disabled should be True or False
+    # some rows have 0/1 instead - need to figure out how to handle those
+    # for now just drop anything that isn't True/False
+    if [ "$comments_disabled" != "True" ] && [ "$comments_disabled" != "False" ]; then
+        continue
+    fi
+
+    if [ "$ratings_disabled" != "True" ] && [ "$ratings_disabled" != "False" ]; then
+        continue
+    fi
+
+    # print cleaned row
+    echo "$video_id,$publish_date,$views,$likes,$dislikes,$comments_disabled,$ratings_disabled"
+
+done
+
+# TODO: remove duplicate video_id rows (keep first occurrence?)
+# TODO: check if views >= likes + dislikes (not sure if this is required)
