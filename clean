@@ -3,72 +3,69 @@
 # Name: Aakarsh Sagar Mahajan
 # Date: 20 May 2026
 #
-# clean - reads a CSV of YouTube trending video data and removes rows
-# that contain missing fields, non-numeric view/like/dislike counts,
-# malformed dates, or invalid boolean values in the disabled columns.
-# cleaned output is written to stdout so it can be redirected to a file.
-#
+# clean - reads trending_videos_unclean.csv and outputs a cleaned version
+# to stdout. performs 5 error checks on the input file first, then cleans
+# the data by removing rows with empty fields, zero likes/dislikes, and
+# duplicate rows. also strips the timestamp off publish_date and drops
+# the ratings_disabled column entirely.
 # Usage: ./clean <inputfile>
 
-if [ $# -ne 1 ]; then
-    echo "Usage: $0 <inputfile>" >&2
+# Checking Errors
+
+# 1. no file argument given
+if [ $# -eq 0 ]; then
+    echo "ERROR: No input CSV file provided"
     exit 1
 fi
 
 inputfile="$1"
 
+# 2. file not found in current directory
 if [ ! -f "$inputfile" ]; then
-    echo "Error: file '$inputfile' not found" >&2
+    echo "ERROR: Input file not found in the current directory"
     exit 1
 fi
 
-# expected columns: video_id,publish_date,views,likes,dislikes,comments_disabled,ratings_disabled
+# 3. input file must have a .csv extension
+if [[ "$inputfile" != *.csv ]]; then
+    echo "ERROR: Input file expected in a CSV format"
+    exit 1
+fi
 
-# print header first
-head -1 "$inputfile"
+# 4. file should not be empty
+if [ ! -s "$inputfile" ]; then
+    echo "ERROR: Empty file provided"
+    exit 1
+fi
 
-# skip header, process rest line by line
-tail -n +2 "$inputfile" | while IFS=',' read -r video_id publish_date views likes dislikes comments_disabled ratings_disabled; do
+# 5. header must have exactly 7 columns
+num_cols=$(head -1 "$inputfile" | awk -F',' '{print NF}')
+if [ "$num_cols" -ne 7 ]; then
+    echo "ERROR: Expected 7 columns in the header"
+    exit 1
+fi
 
-    # skip rows that don't have all 7 fields
-    # (still need to handle quoted commas properly - TODO)
-    if [ -z "$video_id" ] || [ -z "$publish_date" ] || [ -z "$views" ]; then
-        continue
-    fi
+#Data Cleaning
 
-    # views, likes, dislikes should be non-negative integers
-    if ! [[ "$views" =~ ^[0-9]+$ ]]; then
-        continue
-    fi
+# print the new header - ratings_disabled is dropped
+echo "video_id,publish_date,views,likes,dislikes,comments_disabled"
 
-    if ! [[ "$likes" =~ ^[0-9]+$ ]]; then
-        continue
-    fi
+# go through each data row and apply all cleaning rules
+tail -n +2 "$inputfile" | awk -F',' '
+{
+    # skip rows that do not have exactly 7 fields
+    if (NF != 7) next
 
-    if ! [[ "$dislikes" =~ ^[0-9]+$ ]]; then
-        continue
-    fi
+    # skip rows with any empty field
+    if ($1 == "" || $2 == "" || $3 == "" || $4 == "" || $5 == "" || $6 == "") next
 
-    # publish_date should be in YYYY-MM-DD format
-    if ! [[ "$publish_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-        continue
-    fi
+    # skip rows where likes or dislikes are zero
+    if ($4 == 0 || $5 == 0) next
 
-    # comments_disabled and ratings_disabled should be True or False
-    # some rows have 0/1 instead - need to figure out how to handle those
-    # for now just drop anything that isn't True/False
-    if [ "$comments_disabled" != "True" ] && [ "$comments_disabled" != "False" ]; then
-        continue
-    fi
+    # strip the time from publish_date, keep only YYYY-MM-DD
+    split($2, date, "T")
 
-    if [ "$ratings_disabled" != "True" ] && [ "$ratings_disabled" != "False" ]; then
-        continue
-    fi
+    # print row without ratings_disabled
+    print $1 "," date[1] "," $3 "," $4 "," $5 "," $6
 
-    # print cleaned row
-    echo "$video_id,$publish_date,$views,$likes,$dislikes,$comments_disabled,$ratings_disabled"
-
-done
-
-# TODO: remove duplicate video_id rows (keep first occurrence?)
-# TODO: check if views >= likes + dislikes (not sure if this is required)
+}' | sort -u
