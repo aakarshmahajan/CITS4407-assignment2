@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+
+# Name: Aakarsh Sagar Mahajan
+# Date: 21 May 2026
+#
+# This script takes the cleaned CSV file and does some analysis on it.
+# It figures out things like which video appeared the most, the average views,
+# which video got the most dislikes, and which had the best/worst engagement.
+# Usage: ./analyse <cleaned_csv_file>
+
+# making sure the user actually gave a file as an argument
+if [ $# -eq 0 ]; then
+    echo "ERROR: No input CSV file provided"
+    exit 1
+fi
+
+inputfile="$1"
+
+# check if the file actually exists
+if [ ! -f "$inputfile" ]; then
+    echo "ERROR: Input file not found in the current directory"
+    exit 1
+fi
+
+# the input should be a csv file
+if [[ "$inputfile" != *.csv ]]; then
+    echo "ERROR: Input file expected in a CSV format"
+    exit 1
+fi
+
+# no point continuing if the file is empty
+if [ ! -s "$inputfile" ]; then
+    echo "ERROR: Empty file provided"
+    exit 1
+fi
+
+# the cleaned file should have exactly 6 columns, just double checking
+num_cols=$(head -1 "$inputfile" | awk -F',' '{print NF}')
+if [ "$num_cols" -ne 6 ]; then
+    echo "ERROR: Expected 6 columns in the header"
+    exit 1
+fi
+
+# use sed to strip the header line before awk even sees the file
+# that way awk only gets the actual data rows and i dont have to
+# check NR == 1 inside awk to skip it - cleaner split of responsibilities
+sed '1d' "$inputfile" | awk -F',' '
+{
+    # grab each column into a readable variable name
+    vid      = $1
+    date     = $2
+    views    = $3 + 0
+    likes    = $4 + 0
+    dislikes = $5 + 0
+
+    # count how many times each video_id shows up
+    freq[vid]++
+
+    # keep a running total of views so i can calculate the mean later
+    total_views += views
+    row_count++
+
+    # track which video has the highest dislikes
+    # using dis_seen so i dont add the same video_id twice in case of ties
+    if (row_count == 1 || dislikes > max_dis_val) {
+        max_dis_val = dislikes
+        n_dis = 0
+        dis_id[n_dis++] = vid
+        dis_seen[vid] = 1
+    } else if (dislikes == max_dis_val && !(vid in dis_seen)) {
+        dis_id[n_dis++] = vid
+        dis_seen[vid] = 1
+    }
+
+    # engagement rate = (likes + dislikes) / views
+    # this tells us how actively people reacted to the video
+    # skipping rows where views is 0 to avoid dividing by zero
+    if (views > 0) {
+        eng_rate = (likes + dislikes) / views
+        if (!eng_init || eng_rate > max_eng_val) {
+            eng_init    = 1
+            max_eng_val = eng_rate
+            n_eng = 0
+            eng_id[n_eng]   = vid
+            eng_date[n_eng] = date
+            n_eng++
+        } else if (eng_rate == max_eng_val) {
+            eng_id[n_eng]   = vid
+            eng_date[n_eng] = date
+            n_eng++
+        }
+    }
+
+    # sentiment rate = (likes - dislikes) / views
+    # the lower (more negative) this is, the worse people felt about the video
+    if (views > 0) {
+        sent_rate = (likes - dislikes) / views
+        if (!sent_init || sent_rate < min_sent_val) {
+            sent_init    = 1
+            min_sent_val = sent_rate
+            n_sent = 0
+            sent_id[n_sent]   = vid
+            sent_date[n_sent] = date
+            n_sent++
+        } else if (sent_rate == min_sent_val) {
+            sent_id[n_sent]   = vid
+            sent_date[n_sent] = date
+            n_sent++
+        }
+    }
+}
+
+END {
+    # find the highest frequency first, then loop again to grab all IDs that match it
+    # (had to do two loops here because awk doesnt have a built-in max for arrays)
+    max_freq = 0
+    for (v in freq) {
+        if (freq[v] > max_freq) max_freq = freq[v]
+    }
+    n_mf = 0
+    for (v in freq) {
+        if (freq[v] == max_freq) mf_id[n_mf++] = v
+    }
+
+    for (i = 0; i < n_mf; i++)
+        print "Most frequent video, ID: " mf_id[i]
+
+    # mean views - just total divided by number of rows, formatted to 2 decimal places
+    printf "Mean number of views: %.2f\n", total_views / row_count
+
+    for (i = 0; i < n_dis; i++)
+        print "Max dislikes video, ID: " dis_id[i]
+
+    for (i = 0; i < n_eng; i++)
+        print "Highest engagement rate video, ID: " eng_id[i] ", dated: " eng_date[i]
+
+    for (i = 0; i < n_sent; i++)
+        print "Least sentiment rate video, ID: " sent_id[i] " , dated: " sent_date[i]
+}'
